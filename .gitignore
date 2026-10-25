@@ -1,0 +1,25 @@
+# Personal data - never published (the repo is public)
+audio/
+transcripts/
+Source Files/
+logs/
+YouTube List.txt
+*.vtt
+*.vtt.part
+
+# Machine-specific
+Whisperer.lnk
+__pycache__/
+*.pyc
+
+# Build output
+build/
+dist/
+*.spec.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.claude/settings.local.json
