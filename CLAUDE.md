@@ -2,6 +2,8 @@
 
 The main file is `batch_transcribe.py`. Read it in full before making changes.
 
+**Two machines.** The user works on a Windows PC (main machine; most of this file) and tests the Mac app on an Apple Silicon Mac. Check the platform first: on macOS, follow "Working on the Mac" below; the sections "Environment", "Running", "Checking status" and "PowerShell details" describe the Windows PC only.
+
 Files: `batch_transcribe.py` (the transcription run), `Whisperer.pyw` (window + entry point of the packaged app), `whisperer_core.py` (version, folders, settings, models, platform helpers; standard library only), `whisperer_engine.py` (faster-whisper on Windows, mlx-whisper on Mac), `whisperer_update.py` (update checks/installs), `whisperer.spec` + `.github/workflows/mac.yml` (Mac build), `README.md` (for friends), `CHANGELOG.md` (release notes), `docs/windows-packaging.md` (deferred Windows package).
 
 ## What it does
@@ -23,7 +25,8 @@ Files: `batch_transcribe.py` (the transcription run), `Whisperer.pyw` (window + 
 - The current Windows script and window must keep working as they are while the Mac app is built.
 
 ## Mac app
-- Status (2026-10-25): code, spec and workflow written; Windows path tested; **the Mac build hasn't run yet** — first GitHub Actions run and a test on the user's Mac are pending. This PC can't run MLX or build the `.app`.
+- Status (2026-10-25): the app builds on GitHub Actions and transcribed the CI test sentence correctly on the GPU (run 40231981996). Not yet tested on the user's Mac; no release published yet. This PC can't run MLX or build the `.app`.
+- After MLX has used the GPU, Python's interpreter shutdown can hang (CI: "self-test OK", then the process never exited). `--worker`, `--self-test` and `batch_transcribe.py` therefore end with `whisperer_core.hard_exit()` (flush + `os._exit`) once all files are written; otherwise the window would wait forever after "All done.". The self-test also has a watchdog (`WHISPERER_SELFTEST_TIMEOUT`, default 240 s) that dumps all thread stacks and exits.
 - Requirements: Apple Silicon, macOS 14+ (MLX wheels exist only for macOS 14+; the workflow uses `macos-14` so pip picks those wheels — building on a newer runner raises the minimum macOS). Install: `requirements-mac.txt`, then `pip install --no-deps mlx-whisper==0.4.3` (it lists PyTorch, which isn't needed; the spec excludes it).
 - Build/release: `.github/workflows/mac.yml`. Manual run (Actions → Mac app → Run workflow) builds and tests, artifact only. Release: bump `VERSION` in `whisperer_core.py`, add a `## X.Y.Z` section to `CHANGELOG.md` (it becomes the release notes the app shows), commit, push tag `vX.Y.Z`; the workflow refuses a tag that doesn't match `VERSION`. Assets: `Whisperer-mac-arm64.zip` + `SHA256SUMS.txt` (names are used by the updater).
 - CI self-tests: transcribes a `say` sentence with `mlx-community/whisper-tiny-mlx` (GPU, falls back to CPU via `WHISPERER_MLX_DEVICE=cpu` since CI Macs may have no Metal), and checks that a downloaded yt-dlp overrides the bundled one.
@@ -32,6 +35,23 @@ Files: `batch_transcribe.py` (the transcription run), `Whisperer.pyw` (window + 
 - Audio is decoded with PyAV (`whisperer_engine.decode_audio`, verified identical to faster-whisper's decoder, and same output with PyAV 14 and 19), so no ffmpeg is needed on the Mac. The Mac uses current PyAV, not `av<15`: that pin is only for faster-whisper, and PyAV 14.x has no macOS arm64 wheel (pip tries to compile it and fails).
 - Packaged app on macOS uses certifi for HTTPS (python.org's macOS Python has no system CA certificates).
 - Friends install: unzip, drag to Applications, first launch blocked (unsigned) → System Settings → Privacy & Security → Open Anyway. README has the steps.
+
+## Working on the Mac (for a session running there)
+- Shell is zsh; use `python3` (python.org 3.12 — includes Tk; Homebrew's Python needs `brew install python-tk`). No `py`, no PowerShell, no `Whisperer.lnk`.
+- Before the first commit from the Mac, set the repo-local identity (the repo is public, the user's real email must not appear):
+  `git config user.name "Mark Lanters"` and `git config user.email "153172879+MarkLanters@users.noreply.github.com"`.
+- From source (data stays in the repo folder, like on Windows):
+  ```bash
+  python3 -m venv .venv && source .venv/bin/activate
+  pip install -r requirements-mac.txt && pip install --no-deps mlx-whisper==0.4.3
+  python Whisperer.pyw            # the window
+  python batch_transcribe.py      # the run without the window
+  ```
+- Packaged app: download the newest build — `gh run download <run-id> -n Whisperer-mac-arm64` (`brew install gh`, then `gh auth login`), or in a browser: repo → Actions → newest "Mac app" run → Artifacts (a zip inside a zip). Unpack with `ditto -x -k Whisperer-mac-arm64.zip .`, move `Whisperer.app` to `/Applications`. A browser download is quarantined like a friend's would be (first launch → Privacy & Security → Open Anyway); `gh` downloads usually aren't, so test the friend flow with a browser download at least once.
+- Where things are (packaged app): your files and `settings.json` in `~/Documents/Whisperer`, its log in `~/Documents/Whisperer/logs/run.log` (`tail -f` it to watch), yt-dlp override and update downloads in `~/Library/Application Support/Whisperer`, models in `~/.cache/huggingface/hub`. Is it running: `pgrep -fl Whisperer`; sleep prevented: `pmset -g assertions | grep caffeinate`.
+- Self-test of the installed app: `say -o /tmp/t.aiff "Hello from the Mac"` then `/Applications/Whisperer.app/Contents/MacOS/Whisperer --self-test /tmp/t.aiff` (uses the model from Settings; `WHISPERER_MODEL=mlx-community/whisper-tiny-mlx` for a quick one).
+- First test checklist: Open Anyway flow; Documents access prompt; Put Here creates `uk`/`auto`; Start asks to download the model (3.1 GB) and shows the download state; a short Ukrainian recording in `uk` (check text quality, especially over silences — mlx-whisper has no VAD, unlike faster-whisper on Windows); one YouTube link; Result; Settings (⌘,) incl. switching to large-v3-turbo; Stop and ⌘Q during a run ask first; dark mode looks OK; speed vs. the recording length (note it in "Speed" below). Updates can only be tested once a newer release than the installed one exists (e.g. release 0.1.0, install it, then release 0.1.1).
+- Syntax check: `python3 -m py_compile batch_transcribe.py Whisperer.pyw whisperer_core.py whisperer_engine.py whisperer_update.py`. Fixes go through git (commit + push from the Mac); the Windows PC pulls them.
 
 ## Environment
 - Windows, PowerShell, VS Code. Run Python only via `py` (Python 3.12, where all libraries are installed). VS Code may show a 3.14 interpreter that has no libraries; use `py` and `py -m pip`.
@@ -97,6 +117,7 @@ Get-ChildItem transcripts, "transcripts\Source Files" -Filter *.vtt | Sort-Objec
 ## Working rules
 - Don't break the skip logic, the output naming in `transcripts/` or the `YouTube List.txt` format — the user relies on them.
 - Briefly describe the plan before large changes.
+- Start with `git pull`: the other machine (Windows PC or Mac) may have pushed changes.
 - After changes, check syntax: `py -m py_compile batch_transcribe.py Whisperer.pyw whisperer_core.py whisperer_engine.py whisperer_update.py`.
 - For window tests, set `WHISPERER_DATA` (and `WHISPERER_SUPPORT` for updater tests) to a scratch folder so the user's files and `settings.json` aren't touched.
 - Don't process the whole queue without permission — it takes hours. Test with one short file.

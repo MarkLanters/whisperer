@@ -217,3 +217,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    core.hard_exit(0)  # interpreter shutdown can hang after MLX used the GPU

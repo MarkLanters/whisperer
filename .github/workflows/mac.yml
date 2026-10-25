@@ -15,6 +15,7 @@ jobs:
   build:
     # macos-14: pip picks MLX wheels for macOS 14, so the app runs on macOS 14 and newer
     runs-on: macos-14
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 
@@ -46,6 +47,7 @@ jobs:
           du -sh dist/Whisperer.app
 
       - name: Self-test - versions and a test transcription
+        timeout-minutes: 20  # the self-test's own watchdog exits after 4 min (GPU) / 10 min (CPU)
         env:
           WHISPERER_MODEL: mlx-community/whisper-tiny-mlx  # small model, same code path as large-v3
           WHISPERER_DATA: ${{ runner.temp }}/data
@@ -55,10 +57,11 @@ jobs:
           app=dist/Whisperer.app/Contents/MacOS/Whisperer
           if ! "$app" --self-test "$RUNNER_TEMP/test.aiff"; then
             echo "::warning::GPU run failed (CI machines often have no Metal GPU); retrying on the CPU"
-            WHISPERER_MLX_DEVICE=cpu "$app" --self-test "$RUNNER_TEMP/test.aiff"
+            WHISPERER_MLX_DEVICE=cpu WHISPERER_SELFTEST_TIMEOUT=600 "$app" --self-test "$RUNNER_TEMP/test.aiff"
           fi
 
       - name: Self-test - a downloaded yt-dlp overrides the bundled one
+        timeout-minutes: 10
         env:
           WHISPERER_SUPPORT: ${{ runner.temp }}/support
         run: |

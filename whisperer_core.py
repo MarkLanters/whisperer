@@ -144,6 +144,17 @@ def worker_command():
     return [str(python), str(SOURCE_DIR / "batch_transcribe.py")]
 
 
+def hard_exit(code=0):
+    """Flush output and end the process without interpreter shutdown, which can hang after MLX has used the GPU
+    (seen in CI: "self-test OK" printed, then the process never exited). Only call when all files are written."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    os._exit(code)
+
+
 def parse_version(v):
     """'v0.1.0' / '2026.10.21' -> (0, 1, 0) / (2026, 10, 21) for comparisons."""
     parts = []

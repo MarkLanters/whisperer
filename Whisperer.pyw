@@ -549,10 +549,22 @@ def run_worker():
     DATA.mkdir(parents=True, exist_ok=True)
     os.chdir(DATA)
     import batch_transcribe
-    batch_transcribe.main()
+    try:
+        batch_transcribe.main()
+    except BaseException:
+        import traceback
+        traceback.print_exc()  # the window looks for "Traceback"
+        core.hard_exit(1)
+    core.hard_exit(0)
 
 
 def self_test(args):
+    import faulthandler
+    for stream in (sys.stdout, sys.stderr):  # every line out at once, also when the watchdog below exits
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(line_buffering=True)
+    # if something hangs (e.g. a GPU without a working Metal driver), print where every thread is and exit
+    faulthandler.dump_traceback_later(int(os.environ.get("WHISPERER_SELFTEST_TIMEOUT", "240")), exit=True)
     core.activate_overlay()
     import av
     import yt_dlp
@@ -563,16 +575,19 @@ def self_test(args):
     print(f"data folder {core.data_dir()} | support folder {core.support_dir()}")
     if args:
         repo = os.environ.get("WHISPERER_MODEL") or core.model_repo(core.load_settings()["model"])
-        print(f"transcribing {args[0]} with {repo}")
+        print(f"loading {repo}")
+        started = time.time()
         model = engine.load(repo)
+        print(f"loaded in {time.time() - started:.1f} s; transcribing {args[0]}")
         found = []
 
         def show(s, duration):
             print(f"  [{s.start:6.2f} - {s.end:6.2f}] {s.text.strip()}")
             found.append(s)
 
+        started = time.time()
         duration = engine.transcribe(model, args[0], None, show)
-        print(f"duration {duration:.1f} s, {len(found)} segments")
+        print(f"duration {duration:.1f} s, {len(found)} segments, transcribed in {time.time() - started:.1f} s")
         if not found:
             print("self-test FAILED: no speech recognized")
             return 1
@@ -586,7 +601,13 @@ def main():
         run_worker()
         return
     if args[:1] == ["--self-test"]:
-        sys.exit(self_test(args[1:]))
+        try:
+            code = self_test(args[1:])
+        except BaseException:
+            import traceback
+            traceback.print_exc()
+            code = 1
+        core.hard_exit(code)
     try:
         from ctypes import windll
         windll.shcore.SetProcessDpiAwareness(1)  # crisp text on scaled displays; must run before Tk()
