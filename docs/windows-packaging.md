@@ -1,8 +1,17 @@
 # Windows packaging — deferred plan
 
-Status (2026-10-25): **not started.** The Mac app is built first. When the user asks for the Windows app,
-read this file, `CLAUDE.md` and the current code, then pick up from "Steps" below. Everything decided
+Status (2026-10-25): **Windows package not started.** The Mac app is built first. When the user asks for the
+Windows app, read this file, `CLAUDE.md` and the current code, then pick up from "Steps" below. Everything decided
 for the Mac version (shared code, updater, GitHub releases) should be reused, not redone.
+
+Already in the shared code (written for the Mac, platform-aware):
+- `whisperer_core.data_dir()` → `Documents\Whisperer` when frozen; `support_dir()` → `%LOCALAPPDATA%\Whisperer`.
+- `whisperer_core.worker_command()` → `[sys.executable, "--worker"]` when frozen; `Whisperer.pyw` handles `--worker`
+  and `--self-test` and fixes missing stdout/stderr in a windowed app.
+- Keep-awake on Windows (`keep_awake()` in `Whisperer.pyw`), model-download approval, Settings dialog with model choice.
+- Updater: release check, SHA-256 checks and the yt-dlp override (`activate_overlay`) are cross-platform;
+  `can_install_app_update()` / `prepare_app_update()` are Mac-only (zip + `ditto` + shell helper) — Windows needs
+  the installer variant described below and a Windows asset name.
 
 ## Decisions already made
 - Audience: a few friends. Not a public release, no company IT to satisfy.
@@ -59,9 +68,10 @@ for the Mac version (shared code, updater, GitHub releases) should be reused, no
 - Output naming and skip logic must stay as in CLAUDE.md ("Do not use `Path.with_suffix`" etc.).
 
 ## Steps
-1. Windows paths in the shared settings module (`Documents\Whisperer`, `%LOCALAPPDATA%`).
-2. Worker mode via the `.exe`; keep-awake on Windows.
-3. PyInstaller spec for Windows; build locally on this PC and test with one short file.
+1. ~~Windows paths in the shared settings module~~ — done (`whisperer_core`).
+2. ~~Worker mode via the `.exe`; keep-awake on Windows~~ — done; verify in the frozen build.
+3. PyInstaller spec for Windows (separate from the Mac `whisperer.spec`: faster-whisper instead of mlx, exclude mlx);
+   build locally on this PC and test with one short file.
 4. Inno Setup script; test install/uninstall without admin.
 5. Hook the shared updater to the installer; test an update from x.y.z to x.y.z+1.
 6. Add the Windows job to GitHub Actions.

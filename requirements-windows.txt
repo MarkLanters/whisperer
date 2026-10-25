@@ -1,0 +1,4 @@
+# Windows: py -m pip install --only-binary=:all: -r requirements-windows.txt
+yt-dlp
+faster-whisper
+av<15

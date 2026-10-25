@@ -4,6 +4,7 @@ transcripts/
 Source Files/
 logs/
 YouTube List.txt
+settings.json
 *.vtt
 *.vtt.part
 

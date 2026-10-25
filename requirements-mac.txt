@@ -1,0 +1,15 @@
+# Mac: Apple Silicon, macOS 14 or newer. mlx-whisper itself goes in with --no-deps, because it lists PyTorch,
+# which transcription doesn't use (it's only for converting models):
+#   python3 -m pip install -r requirements-mac.txt
+#   python3 -m pip install --no-deps mlx-whisper==0.4.3
+mlx
+numba
+numpy
+scipy
+tqdm
+more-itertools
+tiktoken
+huggingface_hub
+yt-dlp
+av<15
+certifi

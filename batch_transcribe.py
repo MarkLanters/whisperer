@@ -1,18 +1,21 @@
 import re
+import sys
 import time
 import queue
 import threading
 from pathlib import Path
 
 import yt_dlp
-from faster_whisper import WhisperModel
-from faster_whisper.tokenizer import _LANGUAGE_CODES
+
+import whisperer_core as core
+import whisperer_engine as engine
 
 # ---------- Settings ----------
-MODEL = "large-v3"
+# Paths are relative to the data folder: the window starts this script there (see whisperer_core.data_dir).
+# settings.json in that folder (written by the window's Settings dialog) overrides MODEL, the languages and KEEP_AUDIO.
+MODEL = "large-v3"        # a key of whisperer_core.MODELS, or a Hugging Face repo id
 LANGUAGE = None           # default language for YouTube List lines without a code; None = auto-detect
 SOURCE_LANGUAGE = None    # language for files placed directly in Source Files (no language subfolder)
-CPU_THREADS = 14
 LINKS_FILE = Path("YouTube List.txt")
 AUDIO_DIR = Path("audio")
 SOURCE_DIR = Path("Source Files")
@@ -20,12 +23,17 @@ OUT_DIR = Path("transcripts")
 OUT_SOURCE = OUT_DIR / "Source Files"
 KEEP_AUDIO = False        # True = keep downloaded YouTube audio (Source Files are never deleted)
 PREFETCH = 2              # how many videos to download ahead while transcribing
-MEDIA_EXT = {
-    ".mp4", ".m4a", ".mp3", ".wav", ".webm", ".mkv", ".mov", ".aac", ".ogg", ".flac",
-    ".opus", ".oga", ".weba", ".wma", ".m4b", ".aif", ".aiff", ".caf", ".amr", ".mka", ".ac3",
-    ".avi", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg", ".ts", ".mts", ".m2ts", ".3gp",
-}
+MEDIA_EXT = core.MEDIA_EXT
 # ------------------------------
+
+if core.settings_exist(Path.cwd()):
+    _cfg = core.load_settings(Path.cwd())
+    MODEL = _cfg["model"]
+    LANGUAGE = None if _cfg["youtube_language"] in ("", "auto") else _cfg["youtube_language"]
+    SOURCE_LANGUAGE = None if _cfg["source_language"] in ("", "auto") else _cfg["source_language"]
+    KEEP_AUDIO = bool(_cfg["keep_audio"])
+
+LANGUAGE_CODES = None  # filled from the engine in main()
 
 
 def safe_name(s):
@@ -45,7 +53,7 @@ def parse_lang(code):
     code = code.lower()
     if code == "auto":
         return None
-    if code in _LANGUAGE_CODES:
+    if code in LANGUAGE_CODES:
         return code
     raise ValueError(code)
 
@@ -137,11 +145,11 @@ def transcribe(model, media, lang, out_vtt):
     """Writes the .vtt and returns True on success. The file only appears once fully written."""
     start = time.time()
     try:
-        segments, info = model.transcribe(str(media), language=lang, vad_filter=True)
+        duration, segments = engine.transcribe(model, media, lang)
         cues = ["WEBVTT\n"]
         for s in segments:
             text = s.text.strip()
-            pct = s.end / info.duration * 100 if info.duration else 0
+            pct = min(s.end / duration * 100, 100) if duration else 0  # the last segment can end past the audio
             print(f"  {pct:5.1f}%  {text}")
             cues.append(f"{vtt_time(s.start)} --> {vtt_time(s.end)}\n{text}\n")
         tmp = out_vtt.parent / f"{out_vtt.name}.part"
@@ -151,11 +159,22 @@ def transcribe(model, media, lang, out_vtt):
         print(f"  ! Transcription failed: {e}")
         return False
     mins = (time.time() - start) / 60
-    print(f"  ✓ Done in {mins:.1f} min (recording {info.duration / 60:.1f} min)")
+    print(f"  ✓ Done in {mins:.1f} min (recording {duration / 60:.1f} min)")
     return True
 
 
 def main():
+    global LANGUAGE_CODES
+    for stream in (sys.stdout, sys.stderr):  # UTF-8 and line by line, also inside the packaged app
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+    LANGUAGE_CODES = engine.language_codes()
+    for name in ("LANGUAGE", "SOURCE_LANGUAGE"):
+        code = globals()[name]
+        if code is not None and code not in LANGUAGE_CODES:
+            print(f"! Unknown language code '{code}' in settings - using auto-detect")
+            globals()[name] = None
+
     AUDIO_DIR.mkdir(exist_ok=True)
     OUT_SOURCE.mkdir(parents=True, exist_ok=True)
 
@@ -175,7 +194,7 @@ def main():
         threading.Thread(target=downloader, args=(items, q), daemon=True).start()
 
     print(f"Loading model {MODEL}...")
-    model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=CPU_THREADS)
+    model = engine.load(core.model_repo(MODEL))
 
     for n, (media, lang, out_vtt) in enumerate(sources, 1):
         print(f"\n[Source {n}/{len(sources)}] {media.relative_to(SOURCE_DIR)}  (language: {lang or 'auto'})")
