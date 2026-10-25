@@ -614,6 +614,12 @@ def main():
     except Exception:
         pass
     root = tk.Tk()
+    if not core.single_instance(DATA):
+        root.withdraw()
+        messagebox.showinfo("Whisperer", "Whisperer is already open. Use the window that is already running.\n\n"
+                                         "(If you installed a new copy, quit the old one first.)")
+        root.destroy()
+        return
     App(root)
     root.mainloop()
 

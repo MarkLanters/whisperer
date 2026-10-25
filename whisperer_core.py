@@ -144,6 +144,32 @@ def worker_command():
     return [str(python), str(SOURCE_DIR / "batch_transcribe.py")]
 
 
+_instance_lock = None  # kept open for the life of the window
+
+
+def single_instance(folder):
+    """Lock <folder>/logs/whisperer.lock; False if another window already holds it. Two windows on one data folder
+    would both write logs/run.log (garbling it) and transcribe the same files. The OS drops the lock when the
+    process ends, also after a crash. The worker child doesn't inherit it (close_fds)."""
+    global _instance_lock
+    path = Path(folder) / "logs" / "whisperer.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(path, "a+")
+    try:
+        if IS_WINDOWS:
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return False
+    _instance_lock = f
+    return True
+
+
 def hard_exit(code=0):
     """Flush output and end the process without interpreter shutdown, which can hang after MLX has used the GPU
     (seen in CI: "self-test OK" printed, then the process never exited). Only call when all files are written."""

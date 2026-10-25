@@ -25,7 +25,7 @@ Files: `batch_transcribe.py` (the transcription run), `Whisperer.pyw` (window + 
 - The current Windows script and window must keep working as they are while the Mac app is built.
 
 ## Mac app
-- Status (2026-10-25): first fully green build, run 40234774895 (commit 18d4b83): app 443 MB, zip 148 MB; the self-test transcribed the CI sentence correctly on the GPU (no CPU fallback needed) and exited cleanly; the yt-dlp override check passed. The artifact `Whisperer-mac-arm64` of that run is the build to test. Not yet tested on the user's Mac; no release published yet. This PC can't run MLX or build the `.app`.
+- Status (2026-10-25): first fully green build, run 40234774895 (commit 18d4b83): app 443 MB, zip 148 MB; the self-test transcribed the CI sentence correctly on the GPU (no CPU fallback needed) and exited cleanly; the yt-dlp override check passed. The artifact `Whisperer-mac-arm64` of that run is the build to test. First test on the user's Mac (2026-10-25, macOS 26.6, browser download, quarantined): installed, model large-v3 downloaded, a 2.5-min Ukrainian `.m4a` in `Source Files/uk` transcribed in 0.5 min with good text and no hallucinations over pauses; `.vtt` written correctly. The rest of the first-test checklist is still open. No release published yet. This PC can't run MLX or build the `.app`.
 - After MLX has used the GPU, Python's interpreter shutdown can hang (CI: "self-test OK", then the process never exited). `--worker`, `--self-test` and `batch_transcribe.py` therefore end with `whisperer_core.hard_exit()` (flush + `os._exit`) once all files are written; otherwise the window would wait forever after "All done.". The self-test also has a watchdog (`WHISPERER_SELFTEST_TIMEOUT`, default 240 s) that dumps all thread stacks and exits.
 - Requirements: Apple Silicon, macOS 14+ (MLX wheels exist only for macOS 14+; the workflow uses `macos-14` so pip picks those wheels — building on a newer runner raises the minimum macOS). Install: `requirements-mac.txt`, then `pip install --no-deps mlx-whisper==0.4.3` (it lists PyTorch, which isn't needed; the spec excludes it).
 - Build/release: `.github/workflows/mac.yml`. Manual run (Actions → Mac app → Run workflow) builds and tests, artifact only. Release: bump `VERSION` in `whisperer_core.py`, add a `## X.Y.Z` section to `CHANGELOG.md` (it becomes the release notes the app shows), commit, push tag `vX.Y.Z`; the workflow refuses a tag that doesn't match `VERSION`. Assets: `Whisperer-mac-arm64.zip` + `SHA256SUMS.txt` (names are used by the updater).
@@ -73,6 +73,7 @@ Files: `batch_transcribe.py` (the transcription run), `Whisperer.pyw` (window + 
 - Pylance in VS Code reports `Import "faster_whisper..." could not be resolved` because of the 3.14 interpreter; ignore it.
 - Every extension in `MEDIA_EXT` was checked to decode through PyAV 14.2 (Opus, WMA/WMV, AMR/3GP, AIFF, CAF, AC3, AVI, FLV, MPEG, TS/MTS/M2TS and others). DRM-protected files (`.m4p`, protected `.wma`) and video without an audio track will fail. A new extension only needs to be added to `MEDIA_EXT`; PyAV decodes almost any format.
 - huggingface_hub 1.x calls a cached model "incomplete" if any repo file is missing; faster-whisper downloads only 5 files, so `whisperer_core.model_cached` passes the same `allow_patterns` (otherwise the window would offer to re-download a model that is there).
+- Only one window per data folder: `whisperer_core.single_instance` locks `logs/whisperer.lock` (flock / msvcrt); a second copy (e.g. one from Downloads, one from /Applications) shows "already open" and quits. Before the lock, two copies both wrote `logs/run.log` and garbled it (a broken copy of its last lines after "All done.", seen on the Mac 2026-10-25).
 - Transcription cannot resume mid-file: if the process dies (PC shut down, sleep), that file starts over. A leftover `*.vtt.part` can be deleted.
 
 ## Using it (guide for a new session)
@@ -107,7 +108,7 @@ Get-ChildItem transcripts, "transcripts\Source Files" -Filter *.vtt | Sort-Objec
 - The background-task completion notice is lost if the Claude session restarts, while Python may keep running — always check `Get-Process`.
 
 ### Speed (for estimates)
-- CPU transcription takes roughly 0.9–1.8× the recording length (Teams recordings ≈ 1.7×). Estimate the remainder from the % in the log and the time since the file started.
+- CPU transcription takes roughly 0.9–1.8× the recording length (Teams recordings ≈ 1.7×). Mac (M1/M2, mlx-whisper large-v3 on the GPU): ≈ 0.2× (2.5-min recording in 0.5 min). Estimate the remainder from the % in the log and the time since the file started.
 - During a run, remind the user not to shut down the PC or let it sleep.
 
 ### PowerShell details
