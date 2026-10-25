@@ -1,13 +1,14 @@
 """Transcription engines with one interface: faster-whisper (Windows, CPU) and mlx-whisper (Mac, Apple GPU).
 
     model = load(repo)
-    duration, segments = transcribe(model, media_path, language)   # segments: iterator of Segment
+    duration = transcribe(model, media_path, language, on_segment)   # on_segment(Segment, duration) per segment
+
+Everything runs in the calling thread: MLX streams belong to the thread that created them, so a model loaded in
+one thread fails in another ("There is no Stream(gpu, 1) in current thread").
 """
 import importlib
 import os
-import queue
 import re
-import threading
 from collections import namedtuple
 
 import whisperer_core as core
@@ -32,12 +33,14 @@ def load(repo):
     return WhisperModel(repo, device="cpu", compute_type="int8", cpu_threads=CPU_THREADS)
 
 
-def transcribe(model, media, lang):
-    """Returns (duration in seconds, iterator of Segment); segments arrive while transcription runs."""
+def transcribe(model, media, lang, on_segment):
+    """Calls on_segment(segment, duration) for each segment as soon as it is ready; returns the duration in seconds."""
     if core.ENGINE == "mlx":
-        return _mlx_transcribe(model, media, lang)
+        return _mlx_transcribe(model, media, lang, on_segment)
     segments, info = model.transcribe(str(media), language=lang, vad_filter=True)
-    return info.duration, segments
+    for s in segments:
+        on_segment(Segment(s.start, s.end, s.text), info.duration)
+    return info.duration
 
 
 def decode_audio(path, sr=SAMPLE_RATE):
@@ -84,11 +87,10 @@ def _mlx_load(repo):
     return repo
 
 
-def _mlx_transcribe(repo, media, lang):
+def _mlx_transcribe(repo, media, lang, on_segment):
     mlx_transcribe = _mlx_module()
     audio = decode_audio(media)
     duration = len(audio) / SAMPLE_RATE
-    q = queue.Queue()
 
     def capture(*args, **kwargs):
         text = " ".join(str(a) for a in args)
@@ -96,24 +98,13 @@ def _mlx_transcribe(repo, media, lang):
         if m:
             start, end = _seconds(m[1]), _seconds(m[2])
             if end > start and m[3].strip():
-                q.put(Segment(start, end, m[3]))
+                on_segment(Segment(start, end, m[3]), duration)
         else:
             print(*args, **kwargs)  # e.g. "Detected language: Ukrainian"
 
-    def run():
-        try:
-            mlx_transcribe.print = capture
-            mlx_transcribe.transcribe(audio, path_or_hf_repo=repo, language=lang, verbose=True)
-            q.put(None)
-        except BaseException as e:
-            q.put(e)
-
-    threading.Thread(target=run, daemon=True).start()
-
-    def segments():
-        while (item := q.get()) is not None:
-            if isinstance(item, BaseException):
-                raise item
-            yield item
-
-    return duration, segments()
+    mlx_transcribe.print = capture
+    try:
+        mlx_transcribe.transcribe(audio, path_or_hf_repo=repo, language=lang, verbose=True)
+    finally:
+        del mlx_transcribe.print  # back to the built-in
+    return duration

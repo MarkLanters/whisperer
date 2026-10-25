@@ -144,14 +144,16 @@ def downloader(items, q):
 def transcribe(model, media, lang, out_vtt):
     """Writes the .vtt and returns True on success. The file only appears once fully written."""
     start = time.time()
+    cues = ["WEBVTT\n"]
+
+    def add(s, duration):
+        text = s.text.strip()
+        pct = min(s.end / duration * 100, 100) if duration else 0  # the last segment can end past the audio
+        print(f"  {pct:5.1f}%  {text}")
+        cues.append(f"{vtt_time(s.start)} --> {vtt_time(s.end)}\n{text}\n")
+
     try:
-        duration, segments = engine.transcribe(model, media, lang)
-        cues = ["WEBVTT\n"]
-        for s in segments:
-            text = s.text.strip()
-            pct = min(s.end / duration * 100, 100) if duration else 0  # the last segment can end past the audio
-            print(f"  {pct:5.1f}%  {text}")
-            cues.append(f"{vtt_time(s.start)} --> {vtt_time(s.end)}\n{text}\n")
+        duration = engine.transcribe(model, media, lang, add)
         tmp = out_vtt.parent / f"{out_vtt.name}.part"
         tmp.write_text("\n".join(cues), encoding="utf-8")
         tmp.replace(out_vtt)

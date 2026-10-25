@@ -565,13 +565,15 @@ def self_test(args):
         repo = os.environ.get("WHISPERER_MODEL") or core.model_repo(core.load_settings()["model"])
         print(f"transcribing {args[0]} with {repo}")
         model = engine.load(repo)
-        duration, segments = engine.transcribe(model, args[0], None)
-        count = 0
-        for s in segments:
+        found = []
+
+        def show(s, duration):
             print(f"  [{s.start:6.2f} - {s.end:6.2f}] {s.text.strip()}")
-            count += 1
-        print(f"duration {duration:.1f} s, {count} segments")
-        if not count:
+            found.append(s)
+
+        duration = engine.transcribe(model, args[0], None, show)
+        print(f"duration {duration:.1f} s, {len(found)} segments")
+        if not found:
             print("self-test FAILED: no speech recognized")
             return 1
     print("self-test OK")
