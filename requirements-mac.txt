@@ -11,5 +11,7 @@ more-itertools
 tiktoken
 huggingface_hub
 yt-dlp
-av<15
+# not av<15 as on Windows: that pin is for faster-whisper, which the Mac doesn't use, and PyAV has
+# macOS arm64 wheels only from 15 on (pip would try to compile 14.x and fail)
+av
 certifi
