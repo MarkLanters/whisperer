@@ -1,15 +1,23 @@
-# Builds Whisperer.app on an Apple Silicon Mac, tests it, and publishes a GitHub release for version tags.
-#   Test build (no release): Actions tab -> "Mac app" -> Run workflow; download the artifact.
-#   Release: set VERSION in whisperer_core.py, add a CHANGELOG.md section, then push a tag vX.Y.Z.
+# Builds the Mac app on an Apple Silicon Mac, tests it, and publishes it.
+#   Dev:  every push to the dev branch -> "Whisperer Dev.app", published as a GitHub pre-release vX.Y.Z-dev.N
+#         (only the dev app updates to these; the newest 5 are kept).
+#   Prod: push a tag vX.Y.Z (VERSION in whisperer_core.py, a CHANGELOG.md section) -> "Whisperer.app", a normal
+#         release that friends' apps update to.
+#   Manual run (Actions -> Mac app -> Run workflow): dev on the dev branch, a prod build without release on main.
 name: Mac app
 
 on:
   push:
-    tags: ["v*"]
+    branches: [dev]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
 
 permissions:
   contents: write  # create releases
+
+concurrency:  # a newer push to dev replaces a dev build that is still running
+  group: mac-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/dev' }}
 
 jobs:
   build:
@@ -18,10 +26,24 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # tags and history for the dev release notes
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      - name: Choose the release line
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_REF" == refs/heads/main ]]; then
+            channel=prod; app="Whisperer"; asset="Whisperer-mac-arm64.zip"
+          else
+            channel=dev; app="Whisperer Dev"; asset="Whisperer-Dev-mac-arm64.zip"
+          fi
+          printf 'CHANNEL = "%s"\nBUILD = "%s"\n' "$channel" "$GITHUB_RUN_NUMBER" > whisperer_build.py
+          version=$(python -c "import whisperer_core as c; print(c.APP_VERSION)")
+          { echo "CHANNEL=$channel"; echo "APP=$app"; echo "ASSET=$asset"; echo "APP_VERSION=$version"; } >> "$GITHUB_ENV"
+          echo "Building $app $version ($channel)"
 
       - name: Install dependencies
         run: |
@@ -33,18 +55,17 @@ jobs:
       - name: Check that the tag matches VERSION
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          v=$(python -c "import whisperer_core as c; print(c.VERSION)")
-          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::tag is $GITHUB_REF_NAME but VERSION in whisperer_core.py is $v"
+          if [ "v$APP_VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag is $GITHUB_REF_NAME but VERSION in whisperer_core.py is $APP_VERSION"
             exit 1
           fi
 
-      - name: Build Whisperer.app
+      - name: Build the app
         run: |
           pyinstaller --noconfirm --clean whisperer.spec
-          codesign --force --deep --sign - dist/Whisperer.app
-          codesign --verify --deep --strict dist/Whisperer.app
-          du -sh dist/Whisperer.app
+          codesign --force --deep --sign - "dist/$APP.app"
+          codesign --verify --deep --strict "dist/$APP.app"
+          du -sh "dist/$APP.app"
 
       - name: Self-test - versions and a test transcription
         timeout-minutes: 20  # the self-test's own watchdog exits after 4 min (GPU) / 10 min (CPU)
@@ -54,7 +75,7 @@ jobs:
           WHISPERER_SUPPORT: ${{ runner.temp }}/support
         run: |
           say -o "$RUNNER_TEMP/test.aiff" "This is a short test of the Whisperer app."
-          app=dist/Whisperer.app/Contents/MacOS/Whisperer
+          app="dist/$APP.app/Contents/MacOS/Whisperer"
           if ! "$app" --self-test "$RUNNER_TEMP/test.aiff"; then
             echo "::warning::GPU run failed (CI machines often have no Metal GPU); retrying on the CPU"
             WHISPERER_MLX_DEVICE=cpu WHISPERER_SELFTEST_TIMEOUT=600 "$app" --self-test "$RUNNER_TEMP/test.aiff"
@@ -68,30 +89,54 @@ jobs:
           python -m pip download yt-dlp --no-deps --only-binary=:all: -d "$RUNNER_TEMP/ytdlp"
           mkdir -p "$WHISPERER_SUPPORT/packages"
           unzip -q "$RUNNER_TEMP"/ytdlp/*.whl 'yt_dlp/*' -d "$WHISPERER_SUPPORT/packages"
-          dist/Whisperer.app/Contents/MacOS/Whisperer --self-test | tee "$RUNNER_TEMP/overlay.txt"
+          "dist/$APP.app/Contents/MacOS/Whisperer" --self-test | tee "$RUNNER_TEMP/overlay.txt"
           grep -q "from $WHISPERER_SUPPORT/packages/yt_dlp" "$RUNNER_TEMP/overlay.txt"
 
       - name: Package
         run: |
           cd dist
-          ditto -c -k --keepParent Whisperer.app Whisperer-mac-arm64.zip
-          shasum -a 256 Whisperer-mac-arm64.zip > SHA256SUMS.txt
+          ditto -c -k --keepParent "$APP.app" "$ASSET"
+          shasum -a 256 "$ASSET" > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          ls -lh Whisperer-mac-arm64.zip
+          ls -lh "$ASSET"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Whisperer-mac-arm64
+          name: ${{ env.ASSET }}
           path: |
-            dist/Whisperer-mac-arm64.zip
+            dist/${{ env.ASSET }}
             dist/SHA256SUMS.txt
+
+      - name: Publish the dev pre-release
+        if: env.CHANNEL == 'dev' && github.ref == 'refs/heads/dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(gh release list --limit 50 --json tagName,isPrerelease \
+                 --jq '[.[] | select(.isPrerelease and (.tagName | contains("-dev.")))][0].tagName // ""')
+          {
+            echo "Dev build $APP_VERSION (${GITHUB_SHA::7}) - for testing in Whisperer Dev; friends never get dev builds."
+            echo
+            if [ -n "$prev" ] && git rev-parse -q --verify "refs/tags/$prev" >/dev/null; then
+              echo "Changes since $prev:"
+              git log --format='- %s' "$prev..$GITHUB_SHA"
+            else
+              git log -1 --format='- %s' "$GITHUB_SHA"
+            fi
+          } > notes.md
+          cat notes.md
+          gh release create "v$APP_VERSION" "dist/$ASSET" dist/SHA256SUMS.txt --prerelease \
+            --target "$GITHUB_SHA" --title "Whisperer Dev $APP_VERSION" --notes-file notes.md
+          # keep the newest 5 dev pre-releases (the list is newest first)
+          gh release list --limit 100 --json tagName,isPrerelease \
+            --jq '.[] | select(.isPrerelease and (.tagName | contains("-dev."))) | .tagName' \
+            | tail -n +6 | while read -r old; do gh release delete "$old" --cleanup-tag --yes; done
 
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          v="${GITHUB_REF_NAME#v}"
-          awk -v v="$v" 'index($0, "## " v) == 1 {f = 1; next} /^## / {f = 0} f' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/Whisperer-mac-arm64.zip dist/SHA256SUMS.txt \
-            --title "Whisperer $v" --notes-file notes.md
+          awk -v v="$APP_VERSION" 'index($0, "## " v) == 1 {f = 1; next} /^## / {f = 0} f' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" "dist/$ASSET" dist/SHA256SUMS.txt \
+            --title "Whisperer $APP_VERSION" --notes-file notes.md

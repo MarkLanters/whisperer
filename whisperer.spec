@@ -1,5 +1,6 @@
 # PyInstaller spec for the Mac app. Build on an Apple Silicon Mac (GitHub Actions does it, see .github/workflows):
-#   pyinstaller --noconfirm --clean whisperer.spec   ->  dist/Whisperer.app
+#   pyinstaller --noconfirm --clean whisperer.spec   ->  dist/Whisperer.app, or dist/Whisperer Dev.app when
+#   whisperer_build.py (written by the workflow) says CHANNEL = "dev"
 import importlib.util
 import re
 from pathlib import Path
@@ -7,6 +8,11 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 VERSION = re.search(r'^VERSION = "([^"]+)"', Path("whisperer_core.py").read_text(encoding="utf-8"), re.M)[1]
+build = {}
+if Path("whisperer_build.py").exists():
+    exec(Path("whisperer_build.py").read_text(encoding="utf-8"), build)
+DEV = build.get("CHANNEL") == "dev"
+APP = "Whisperer Dev" if DEV else "Whisperer"  # same as whisperer_core.APP_NAME
 
 datas, binaries, hiddenimports = [], [], []
 for pkg in ("mlx", "mlx_whisper"):  # compiled MLX, its Metal shaders, mlx-whisper's tokenizer and mel files
@@ -25,7 +31,7 @@ for f in mlx_dir.rglob("*"):
         datas.append((str(f), dest))
 
 hiddenimports += collect_submodules("yt_dlp")  # extractors are imported lazily
-hiddenimports += ["batch_transcribe", "whisperer_engine", "whisperer_update", "certifi"]
+hiddenimports += ["batch_transcribe", "whisperer_engine", "whisperer_update", "whisperer_build", "certifi"]
 
 a = Analysis(
     ["Whisperer.pyw"],
@@ -51,19 +57,20 @@ exe = EXE(
 coll = COLLECT(exe, a.binaries, a.datas, name="Whisperer")
 app = BUNDLE(
     coll,
-    name="Whisperer.app",
+    name=f"{APP}.app",
     icon=None,
-    bundle_identifier="io.github.marklanters.whisperer",
+    # a separate bundle id lets the dev app sit next to the prod app with its own macOS permissions
+    bundle_identifier="io.github.marklanters.whisperer" + (".dev" if DEV else ""),
     version=VERSION,
     info_plist={
-        "CFBundleName": "Whisperer",
-        "CFBundleDisplayName": "Whisperer",
+        "CFBundleName": APP,
+        "CFBundleDisplayName": APP,
         "CFBundleShortVersionString": VERSION,
         "CFBundleVersion": VERSION,
         "LSMinimumSystemVersion": "14.0",  # MLX wheels need macOS 14+
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,  # follow dark mode
         "LSApplicationCategoryType": "public.app-category.productivity",
-        "NSDocumentsFolderUsageDescription": "Whisperer keeps your recordings and transcripts in Documents/Whisperer.",
+        "NSDocumentsFolderUsageDescription": f"{APP} keeps your recordings and transcripts in Documents/{APP}.",
     },
 )

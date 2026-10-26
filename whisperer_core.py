@@ -8,8 +8,18 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"  # on the dev branch: the next release
 REPO = "MarkLanters/whisperer"  # GitHub owner/name: releases and update checks
+
+# Release line. CI writes whisperer_build.py (CHANNEL = "prod" or "dev", BUILD = run number); without it (running
+# from source) it's prod, unless a local untracked whisperer_build.py says dev (the Windows dev folder has one).
+try:
+    from whisperer_build import BUILD, CHANNEL
+except ImportError:
+    CHANNEL, BUILD = "prod", ""
+DEV = CHANNEL == "dev"
+APP_NAME = "Whisperer Dev" if DEV else "Whisperer"  # also the name of the data and support folders
+APP_VERSION = (f"{VERSION}-dev.{BUILD}" if BUILD else f"{VERSION}-dev") if DEV else VERSION
 
 FROZEN = getattr(sys, "frozen", False)  # True inside the packaged app
 IS_MAC = sys.platform == "darwin"
@@ -46,12 +56,13 @@ DEFAULTS = {
 def data_dir():
     """Where Source Files, transcripts, YouTube List.txt, logs and settings live.
 
-    From source: the project folder (unchanged behaviour). Packaged app: ~/Documents/Whisperer.
+    From source: the project folder (unchanged behaviour). Packaged app: ~/Documents/Whisperer
+    (~/Documents/Whisperer Dev for the dev app, so it never touches the real files).
     """
     if os.environ.get("WHISPERER_DATA"):
         return Path(os.environ["WHISPERER_DATA"])
     if FROZEN:
-        return Path.home() / "Documents" / "Whisperer"
+        return Path.home() / "Documents" / APP_NAME
     return SOURCE_DIR
 
 
@@ -60,10 +71,10 @@ def support_dir():
     if os.environ.get("WHISPERER_SUPPORT"):
         return Path(os.environ["WHISPERER_SUPPORT"])
     if IS_MAC:
-        return Path.home() / "Library" / "Application Support" / "Whisperer"
+        return Path.home() / "Library" / "Application Support" / APP_NAME
     if IS_WINDOWS:
-        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Whisperer"
-    return Path.home() / ".whisperer"
+        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
+    return Path.home() / (".whisperer-dev" if DEV else ".whisperer")
 
 
 def packages_dir():

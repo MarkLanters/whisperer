@@ -31,6 +31,7 @@ OUT_DIR = DATA / "transcripts"
 OUT_SOURCE = OUT_DIR / "Source Files"
 LOG_FILE = DATA / "logs" / "run.log"
 LOG_HINT = "logs\\run.log" if core.IS_WINDOWS else "logs/run.log"
+TITLE = core.APP_NAME  # "Whisperer", or "Whisperer Dev" for dev builds
 GRAY = "#666666" if core.IS_WINDOWS else "gray50"
 
 LINKS_HEADER = (
@@ -78,7 +79,7 @@ def keep_awake(on):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("Whisperer")
+        root.title(TITLE)
         root.resizable(False, False)
         self.proc = None
         self.awake = None  # caffeinate on the Mac
@@ -131,7 +132,7 @@ class App:
         menubar = tk.Menu(self.root)
         if core.IS_MAC:
             appmenu = tk.Menu(menubar, name="apple")  # the menu named after the app
-            appmenu.add_command(label="About Whisperer", command=self.about)
+            appmenu.add_command(label=f"About {TITLE}", command=self.about)
             appmenu.add_command(label="Check for Updates…", command=lambda: self.check_updates(auto=False))
             appmenu.add_separator()
             menubar.add_cascade(menu=appmenu)
@@ -162,7 +163,7 @@ class App:
     def toggle(self):
         if self.proc is None:
             self.start()
-        elif messagebox.askyesno("Whisperer", "Stop the transcription?\nThe file being transcribed will start over next time."):
+        elif messagebox.askyesno(TITLE, "Stop the transcription?\nThe file being transcribed will start over next time."):
             self.stopped = True
             self.proc.terminate()
 
@@ -182,15 +183,15 @@ class App:
         core.open_path(OUT_DIR)
 
     def about(self):
-        messagebox.showinfo("Whisperer", f"Whisperer {core.VERSION}\n\nEngine: {core.ENGINE}\n"
+        messagebox.showinfo(TITLE, f"{TITLE} {core.APP_VERSION}\n\nEngine: {core.ENGINE}\n"
                                          f"Your files: {DATA}\n\ngithub.com/{core.REPO}")
 
     def on_close(self):
         if self.proc is not None:
-            if not messagebox.askyesno("Whisperer", "Transcription is running. Stop it and close?"):
+            if not messagebox.askyesno(TITLE, "Transcription is running. Stop it and close?"):
                 return
             self.proc.terminate()
-        if self.state == "updating" and not messagebox.askyesno("Whisperer", "An update is downloading. Cancel it and close?"):
+        if self.state == "updating" and not messagebox.askyesno(TITLE, "An update is downloading. Cancel it and close?"):
             return
         keep_awake(False)
         self.root.destroy()
@@ -198,11 +199,11 @@ class App:
     # ----- running the script -----
     def start(self):
         if not core.FROZEN and not (core.SOURCE_DIR / "batch_transcribe.py").exists():
-            messagebox.showerror("Whisperer", f"batch_transcribe.py not found next to {Path(__file__).name}")
+            messagebox.showerror(TITLE, f"batch_transcribe.py not found next to {Path(__file__).name}")
             return
         model = core.load_settings()["model"]
         need_model = not core.model_cached(model)
-        if need_model and not messagebox.askyesno("Whisperer", f"The {model} speech model needs to be downloaded once "
+        if need_model and not messagebox.askyesno(TITLE, f"The {model} speech model needs to be downloaded once "
                                                                f"({core.model_size(model)}).\n\nDownload it now and start?"):
             return
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -363,7 +364,7 @@ class App:
                     ytdlp = (upd.ytdlp_version(), upd.ytdlp_latest())
             except Exception as e:
                 if not auto:
-                    self.ui(lambda: messagebox.showerror("Whisperer", f"Couldn't check for updates:\n{e}"))
+                    self.ui(lambda: messagebox.showerror(TITLE, f"Couldn't check for updates:\n{e}"))
                 return
             self.ui(lambda: self.offer_updates(release, ytdlp, auto))
 
@@ -376,11 +377,11 @@ class App:
         if app_new and not (auto and settings["skip_version"] == release["version"]):
             if self.proc is not None:
                 if not auto:
-                    messagebox.showinfo("Whisperer", f"Whisperer {release['version']} is available. "
+                    messagebox.showinfo(TITLE, f"{TITLE} {release['version']} is available. "
                                                      "Install it when the transcription has finished.")
                 return
-            choice = ask_update(self.root, f"Whisperer {release['version']} is available",
-                                f"You have {core.VERSION}.", release["notes"] or "No release notes.",
+            choice = ask_update(self.root, f"{TITLE} {release['version']} is available",
+                                f"You have {core.APP_VERSION}.", release["notes"] or "No release notes.",
                                 ["Update", "Later", "Skip this version"])
             if choice == "Skip this version":
                 settings["skip_version"] = release["version"]
@@ -388,9 +389,9 @@ class App:
             elif choice == "Update":
                 ok, why = upd.can_install_app_update()
                 if ok:
-                    self.run_update(f"Whisperer {release['version']}",
+                    self.run_update(f"{TITLE} {release['version']}",
                                     lambda progress: upd.prepare_app_update(release, progress), self.finish_app_update)
-                elif messagebox.askyesno("Whisperer", f"{why}\n\nOpen the download page instead?"):
+                elif messagebox.askyesno(TITLE, f"{why}\n\nOpen the download page instead?"):
                     webbrowser.open(release["url"])
             return  # one dialog at a time; yt-dlp is offered on the next check
         if ytdlp and core.parse_version(ytdlp[1]["version"]) > core.parse_version(ytdlp[0]):
@@ -404,10 +405,10 @@ class App:
             return
         if not auto:
             if release is None:
-                messagebox.showinfo("Whisperer", f"You have Whisperer {core.VERSION}. No releases are published yet.")
+                messagebox.showinfo(TITLE, f"You have {TITLE} {core.APP_VERSION}. No releases are published yet.")
             else:
                 extra = "" if core.FROZEN else "\n\n(Running from source code: update with git pull.)"
-                messagebox.showinfo("Whisperer", f"Whisperer {core.VERSION} is up to date.{extra}")
+                messagebox.showinfo(TITLE, f"{TITLE} {core.APP_VERSION} is up to date.{extra}")
 
     def run_update(self, what, job, done):
         """Runs job(progress) in a thread with the progress bar; then done(result) on the Tk thread."""
@@ -455,7 +456,7 @@ class App:
 def ask_update(root, title, text, notes, buttons):
     """Modal dialog with optional release notes; returns the clicked button's label (None if closed)."""
     win = tk.Toplevel(root)
-    win.title("Whisperer")
+    win.title(TITLE)
     win.transient(root)
     win.resizable(False, False)
     choice = {"value": None}
@@ -569,7 +570,7 @@ def self_test(args):
     import av
     import yt_dlp
     import whisperer_engine as engine
-    print(f"Whisperer {core.VERSION} | engine {core.ENGINE} | Python {sys.version.split()[0]} | packaged {core.FROZEN}")
+    print(f"{TITLE} {core.APP_VERSION} | channel {core.CHANNEL} | engine {core.ENGINE} | Python {sys.version.split()[0]} | packaged {core.FROZEN}")
     print(f"yt_dlp {yt_dlp.version.__version__} from {Path(yt_dlp.__file__).parent}")
     print(f"av {av.__version__} | languages {len(engine.language_codes())}")
     print(f"data folder {core.data_dir()} | support folder {core.support_dir()}")
@@ -616,7 +617,7 @@ def main():
     root = tk.Tk()
     if not core.single_instance(DATA):
         root.withdraw()
-        messagebox.showinfo("Whisperer", "Whisperer is already open. Use the window that is already running.\n\n"
+        messagebox.showinfo(TITLE, f"{TITLE} is already open. Use the window that is already running.\n\n"
                                          "(If you installed a new copy, quit the old one first.)")
         root.destroy()
         return

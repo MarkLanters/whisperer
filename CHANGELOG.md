@@ -1,6 +1,10 @@
 # Changelog
 
 Each `## X.Y.Z` section becomes the release notes the app shows when it offers that update.
+The newest section is the release in development on the dev branch; finish it before tagging.
+
+## 0.1.1
+- Only one Whisperer window can run at a time (two copies used to write the same files).
 
 ## 0.1.0
 First Mac version.

@@ -16,9 +16,9 @@ from pathlib import Path
 
 import whisperer_core as core
 
-MAC_ASSET = "Whisperer-mac-arm64.zip"
+MAC_ASSET = "Whisperer-Dev-mac-arm64.zip" if core.DEV else "Whisperer-mac-arm64.zip"
 SUMS_ASSET = "SHA256SUMS.txt"
-HEADERS = {"User-Agent": f"Whisperer/{core.VERSION}", "Accept": "application/json"}
+HEADERS = {"User-Agent": f"Whisperer/{core.APP_VERSION}", "Accept": "application/json"}
 
 # Runs after the app quits: swaps the old bundle for the new one (or puts the old one back) and reopens it.
 INSTALL_SCRIPT = r"""
@@ -69,13 +69,24 @@ def download(url, dest, progress=None):
 
 # ---------- the app ----------
 def latest_release():
-    """Newest GitHub release as {'version', 'notes', 'url', 'assets': {name: url}}, or None if there is none yet."""
-    try:
-        d = _json(f"https://api.github.com/repos/{core.REPO}/releases/latest")
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
+    """Newest release of this app's channel as {'version', 'notes', 'url', 'assets': {name: url}}, or None.
+
+    Prod: GitHub's /releases/latest, which never returns pre-releases, so dev builds can't reach friends.
+    Dev: the newest pre-release tagged vX.Y.Z-dev.N.
+    """
+    if core.DEV:
+        dev = [r for r in _json(f"https://api.github.com/repos/{core.REPO}/releases?per_page=30")
+               if r.get("prerelease") and not r.get("draft") and "-dev." in r["tag_name"]]
+        if not dev:
             return None
-        raise
+        d = max(dev, key=lambda r: core.parse_version(r["tag_name"]))
+    else:
+        try:
+            d = _json(f"https://api.github.com/repos/{core.REPO}/releases/latest")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise
     return {
         "version": d["tag_name"].lstrip("vV"),
         "notes": (d.get("body") or "").strip(),
@@ -85,7 +96,7 @@ def latest_release():
 
 
 def is_newer(version):
-    return core.parse_version(version) > core.parse_version(core.VERSION)
+    return core.parse_version(version) > core.parse_version(core.APP_VERSION)
 
 
 def app_bundle():
@@ -94,21 +105,22 @@ def app_bundle():
 
 def can_install_app_update():
     """(True, '') when the app can replace itself, otherwise (False, reason for the user)."""
+    name = core.APP_NAME
     if not core.FROZEN:
-        return False, "Whisperer is running from source code. Update it with git pull."
+        return False, f"{name} is running from source code. Update it with git pull."
     if not core.IS_MAC:
         return False, "Automatic install isn't available on this system yet."
     bundle = app_bundle()
     if "/AppTranslocation/" in str(bundle):
-        return False, ("macOS is running Whisperer from a temporary location. "
-                       "Move Whisperer.app to the Applications folder, open it from there and try again.")
+        return False, (f"macOS is running {name} from a temporary location. "
+                       f"Move {name}.app to the Applications folder, open it from there and try again.")
     if not os.access(bundle.parent, os.W_OK):
-        return False, f"No permission to replace Whisperer in {bundle.parent}."
+        return False, f"No permission to replace {name} in {bundle.parent}."
     return True, ""
 
 
 def prepare_app_update(release, progress=None):
-    """Downloads the new app, checks its SHA-256 and unpacks it; returns the new Whisperer.app."""
+    """Downloads the new app, checks its SHA-256 and unpacks it; returns the new Whisperer.app (Whisperer Dev.app)."""
     assets = release["assets"]
     if MAC_ASSET not in assets or SUMS_ASSET not in assets:
         raise RuntimeError("this release has no Mac download")
@@ -125,9 +137,9 @@ def prepare_app_update(release, progress=None):
         raise RuntimeError("checksum mismatch: the download is damaged or not genuine, nothing was installed")
     # ditto keeps the bundle's symlinks, permissions and signature; zipfile would not
     subprocess.run(["ditto", "-x", "-k", str(archive), str(work / "new")], check=True)
-    app = work / "new" / "Whisperer.app"
-    if not (app / "Contents" / "MacOS" / "Whisperer").exists():
-        raise RuntimeError("the download doesn't contain Whisperer.app")
+    app = work / "new" / f"{core.APP_NAME}.app"
+    if not (app / "Contents" / "MacOS" / "Whisperer").exists():  # the executable keeps its name in both channels
+        raise RuntimeError(f"the download doesn't contain {core.APP_NAME}.app")
     return app
 
 
