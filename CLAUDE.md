@@ -24,6 +24,15 @@ Files: `batch_transcribe.py` (the transcription run), `Whisperer.pyw` (window + 
 - **Mac first.** The Windows package is deferred; its full plan is in `docs/windows-packaging.md`. When the user asks for the Windows app, read that file first.
 - The current Windows script and window must keep working as they are while the Mac app is built.
 
+## Dev and prod (decided 2026-10-26)
+- Two lines: branch **`dev`** (all changes, dev builds for the user) and **`main`** (releases for friends). Make and commit every code change on `dev`; `main` only receives `dev` when releasing (and small docs fixes like this file).
+- **Windows folders:** `D:\Pet Projects\Whisperer` stays on `main` — the user's daily transcriptions (`Whisperer.lnk`). Development happens in the git worktree **`D:\Pet Projects\Whisperer-dev`** (branch `dev`, its own `Source Files`/`transcripts`/`logs`, shortcut `Whisperer Dev.lnk`, an untracked `whisperer_build.py` with `CHANNEL = "dev"` so its window says "Whisperer Dev"). A session that starts in the main folder edits code only under the dev folder (absolute paths) and runs tests there.
+- **Mac:** develop in a worktree on `dev` too (`git worktree add ../whisperer-dev dev` next to the main clone); test with the Whisperer Dev app.
+- **Dev builds:** every push to `dev` makes CI build **Whisperer Dev.app** (bundle id `io.github.marklanters.whisperer.dev`, data `~/Documents/Whisperer Dev`, support `~/Library/Application Support/Whisperer Dev`; the model cache is shared), run the self-tests and publish a GitHub **pre-release** `vX.Y.Z-dev.N` (N = workflow run number) with `Whisperer-Dev-mac-arm64.zip`; only the newest 5 dev pre-releases are kept. It installs next to the prod app. The dev app's updater offers only newer dev pre-releases; the prod app asks GitHub for `/releases/latest`, which never returns pre-releases, so friends never see dev builds.
+- `VERSION` in `whisperer_core.py` on `dev` is the **next** release; dev builds show `VERSION-dev.N`. The channel and build number come from `whisperer_build.py`, written by CI (absent = prod, so source runs on `main` behave as before).
+- **Release to prod:** on `dev`, finish the `## X.Y.Z` section in `CHANGELOG.md` and test the latest dev build on the Mac; then in the main folder `git pull`, `git merge dev`, `git push`, tag `vX.Y.Z` and push the tag → prod build and release. Afterwards bump `VERSION` on `dev` to the next version and add a new `CHANGELOG.md` heading.
+- Until 0.1.1 is released, the dev-channel code exists only on `dev`; `main` (v0.1.0) has the prod-only updater, which is unaffected by dev pre-releases.
+
 ## Mac app
 - Status (2026-10-25): first fully green build, run 40234774895 (commit 18d4b83): app 443 MB, zip 148 MB; the self-test transcribed the CI sentence correctly on the GPU (no CPU fallback needed) and exited cleanly; the yt-dlp override check passed. The artifact `Whisperer-mac-arm64` of that run is the build to test. First test on the user's Mac (2026-10-25, macOS 26.6, browser download, quarantined): installed, model large-v3 downloaded, a 2.5-min Ukrainian `.m4a` in `Source Files/uk` transcribed in 0.5 min with good text and no hallucinations over pauses; `.vtt` written correctly. The rest of the first-test checklist is still open. Release v0.1.0 published 2026-10-26 (run 40239360296, commit de71449, includes the single-instance lock): https://github.com/MarkLanters/whisperer/releases/tag/v0.1.0. Testing the updater needs a 0.1.1 release. This PC can't run MLX or build the `.app`.
 - After MLX has used the GPU, Python's interpreter shutdown can hang (CI: "self-test OK", then the process never exited). `--worker`, `--self-test` and `batch_transcribe.py` therefore end with `whisperer_core.hard_exit()` (flush + `os._exit`) once all files are written; otherwise the window would wait forever after "All done.". The self-test also has a watchdog (`WHISPERER_SELFTEST_TIMEOUT`, default 240 s) that dumps all thread stacks and exits.
@@ -118,7 +127,8 @@ Get-ChildItem transcripts, "transcripts\Source Files" -Filter *.vtt | Sort-Objec
 ## Working rules
 - Don't break the skip logic, the output naming in `transcripts/` or the `YouTube List.txt` format — the user relies on them.
 - Briefly describe the plan before large changes.
-- Start with `git pull`: the other machine (Windows PC or Mac) may have pushed changes.
+- Start with `git pull` (in the dev folder too): the other machine (Windows PC or Mac) may have pushed changes.
+- Code changes go to the `dev` branch (see "Dev and prod"), not `main`.
 - After changes, check syntax: `py -m py_compile batch_transcribe.py Whisperer.pyw whisperer_core.py whisperer_engine.py whisperer_update.py`.
 - For window tests, set `WHISPERER_DATA` (and `WHISPERER_SUPPORT` for updater tests) to a scratch folder so the user's files and `settings.json` aren't touched.
 - Don't process the whole queue without permission — it takes hours. Test with one short file.
